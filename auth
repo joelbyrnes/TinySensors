@@ -1,2 +1,4 @@
+HOST=192.168.0.3
+DATABASE=sensors
 USER=sensors
 PASSWORD=s3ns0rs
