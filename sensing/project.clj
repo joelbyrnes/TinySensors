@@ -3,14 +3,8 @@
 
   :warn-on-reflection true
 
-  ; To run the examples:
-  ;
-  ;   $ lein run :examples
-  ;
-  :run-aliases { :examples seesaw.test.examples.launcher }
-
-  :dependencies [[org.clojure/clojure "1.5.1"]
-                 [korma "0.3.0-RC6"]
+  :dependencies [[org.clojure/clojure "1.6.0"]
+                 [korma "0.3.3"]
                  [mysql/mysql-connector-java "5.1.27"]
                  [log4j "1.2.15" :exclusions [javax.mail/mail
                                              javax.jms/jms
@@ -21,5 +15,4 @@
                  [seesaw "1.4.4"]
                  [clj-time "0.6.0"]]
 
-  :java-source-path "jvm")
-
+  :main sensing.ui)

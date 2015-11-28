@@ -39,11 +39,13 @@ void signal_handler(int signo)
 	fatal("caught", strsignal(signo));
 }
 
+#define IDLE_SECONDS 300
+
 int main(int argc, char *argv[])
 {
-	bool verbose = false, sock = true, daemon = true;
+	bool verbose = false, sock = true, daemon = true, watchdog = true;
 	int opt;
-	while ((opt = getopt(argc, argv, "vs")) != -1)
+	while ((opt = getopt(argc, argv, "vsw")) != -1)
 		switch(opt) {
 		case 'v':
 			verbose = true;
@@ -52,8 +54,11 @@ int main(int argc, char *argv[])
 		case 's':
 			sock = false;
 			break;
+		case 'w':
+			watchdog = false;
+			break;
 		default:
-			fprintf(stderr, "Usage: %s [-v] [-s]\n", argv[0]);
+			fprintf(stderr, "Usage: %s [-v] [-s] [-w]\n", argv[0]);
 			exit(1);
 		}
 
@@ -120,6 +125,9 @@ int main(int argc, char *argv[])
 	RF24Network network(radio);
 	network.begin(90, this_node);
 
+	time_t last_reading;
+	if (watchdog)
+		time(&last_reading);
 	for (;;) {
 		network.update();
 
@@ -128,8 +136,12 @@ int main(int argc, char *argv[])
 			sensor_payload_t payload;
 			network.read(header, &payload, sizeof(payload));
 
+			// fixup for negative temperature
+			short temp = payload.temperature;
+			if ((temp >> 8) == 0x7f)
+				temp = temp - 32768;
+			float temperature = ((float)temp);
 			float humidity = ((float)payload.humidity);
-			float temperature = ((float)payload.temperature);
 			float battery = ((float)payload.battery) * 3.3 / 1023.0;
 
 			// if client connected to socket, send data
@@ -157,25 +169,48 @@ int main(int argc, char *argv[])
 				if (mysql_query(db_conn, buf))
 					fatal("insert", mysql_error(db_conn));
 			}
+			if (watchdog)
+				time(&last_reading);
 		}
 
 		// if server socket has received connection, set up client socket and send header
 		struct timeval timeout;
 		timeout.tv_usec = 100000;
 		timeout.tv_sec = 0;
-		fd_set rd;
-		FD_ZERO(&rd);
-		if (ss > 0)
-			FD_SET(ss, &rd);
-		if (select(ss + 1, &rd, 0, 0, &timeout) > 0) {
-			struct sockaddr_in client;
-			socklen_t addrlen = sizeof(struct sockaddr_in);
-			cs = accept(ss, (struct sockaddr *)&client, &addrlen);
-			if (cs < 0)
-				fatal("accept", strerror(errno));
-
-			const char *header = "node\tlight\tdegC\thum%\tstat\tVbatt\ttype\tmsg-id\ttime\n";
-			write(cs, header, strlen(header));
+		if (!cs) {
+			fd_set rd;
+			FD_ZERO(&rd);
+			if (ss > 0)
+				FD_SET(ss, &rd);
+			if (select(ss + 1, &rd, 0, 0, &timeout) > 0) {
+				struct sockaddr_in client;
+				socklen_t addrlen = sizeof(struct sockaddr_in);
+				cs = accept(ss, (struct sockaddr *)&client, &addrlen);
+				if (cs < 0)
+					fatal("accept", strerror(errno));
+	
+				const char *header = "node\tlight\tdegC\thum%\tstat\tVbatt\ttype\tmsg-id\ttime\n";
+				write(cs, header, strlen(header));
+			}
+		} else {
+			// we have a client, just sleep
+			usleep(timeout.tv_usec);
+		}
+		if (watchdog) {
+			time_t now;
+			time(&now);
+			if (now - last_reading > IDLE_SECONDS) {
+				// start the destruct sequence
+				if (verbose)
+					printf("triggering watchdog\n");
+				int fd = open("/dev/watchdog", O_RDONLY);
+				if (0 > fd)
+					perror("opening watchdog");
+				else
+					close(fd);
+				// bail out
+				break;
+			}
 		}
 	}
 	return 0;

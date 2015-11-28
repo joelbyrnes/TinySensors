@@ -1,8 +1,9 @@
 (ns sensing.ui
+  (:gen-class)
   (:require
-    (clojure (set :as set))
-    (seesaw (core :as s) (keystroke :as k))
-    (clj-time.core :as t))
+    [clojure [set :as set]]
+    [seesaw [core :as s] [keystroke :as k]]
+    [clj-time.core :as t])
   (:import
     (org.jfree.chart ChartPanel)
     (org.joda.time Hours))
@@ -25,7 +26,12 @@
 (def curr-period (atom (periods "6h")))
 
 (defn make-plot [sensor locations period]
-  (.setChart @plot-area (make-chart sensor locations period)))
+  (s/config! @plot-area :cursor :wait)
+  (future
+    (let [c (make-chart sensor locations period)]
+      (s/invoke-later
+        (.setChart @plot-area c)
+        (s/config! @plot-area :cursor :default)))))
 
 (defn make-initial-plot [sensor locations period]
   (reset! plot-area (ChartPanel. (make-initial-chart sensor (first locations) period))))
