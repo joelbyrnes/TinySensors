@@ -17,6 +17,8 @@ static int ss, cs;
 
 void close_exit()
 {
+	printf("Closing connections\n");
+
 	if (db_conn)
 		mysql_close(db_conn);
 	if (cs > 0)
@@ -85,9 +87,11 @@ int main(int argc, char *argv[])
 
 	db_conn = mysql_init(0);
 
-	if (mysql_real_connect(db_conn, "localhost", USER, PASS, "sensors", 0, NULL, 0) == NULL)
+//	if (mysql_real_connect(db_conn, "localhost", USER, PASS, "sensors", 0, NULL, 0) == NULL)
+	if (mysql_real_connect(db_conn, HOST, USER, PASS, DATABASE, 0, NULL, 0) == NULL)
 		fatal("mysql_real_connect", mysql_error(db_conn));
 
+	// set up server socket for clients to connect to, to receive text data
 	if (sock) {
 		ss = socket(AF_INET, SOCK_STREAM, 0);
 		if (ss < 0)
@@ -105,7 +109,8 @@ int main(int argc, char *argv[])
 			fatal("listen", strerror(errno));
 	}
 
-	RF24 radio(RPI_V2_GPIO_P1_15, RPI_V2_GPIO_P1_26, BCM2835_SPI_SPEED_8MHZ);	
+	// set up radio details
+	RF24 radio(RPI_V2_GPIO_P1_15, RPI_V2_GPIO_P1_26, BCM2835_SPI_CLOCK_DIVIDER_32);	
 	radio.begin();
 	radio.enableDynamicPayloads();
 	radio.setAutoAck(true);
@@ -123,10 +128,11 @@ int main(int argc, char *argv[])
 			sensor_payload_t payload;
 			network.read(header, &payload, sizeof(payload));
 
-			float humidity = ((float)payload.humidity) / 10;
-			float temperature = ((float)payload.temperature) / 10;
+			float humidity = ((float)payload.humidity);
+			float temperature = ((float)payload.temperature);
 			float battery = ((float)payload.battery) * 3.3 / 1023.0;
 
+			// if client connected to socket, send data
 			if (cs > 0) {
 				char buf[1024];
 				int n = sprintf(buf, "%d\t%d\t%3.1f\t%3.1f\t%d\t%4.2f\t%u\t%d\t%u\n", 
@@ -139,6 +145,7 @@ int main(int argc, char *argv[])
 				}
 			}
 
+			// insert data to database table
 			if (header.from_node > 0) {
 				char buf[1024];
 				sprintf(buf, "INSERT INTO sensor_data (node_id,node_ms,light,humidity,temperature,battery,status,msg_id) VALUES(%d,%d,%d,%.1f,%.1f,%.2f,%d,%d)", 
@@ -152,6 +159,7 @@ int main(int argc, char *argv[])
 			}
 		}
 
+		// if server socket has received connection, set up client socket and send header
 		struct timeval timeout;
 		timeout.tv_usec = 100000;
 		timeout.tv_sec = 0;
